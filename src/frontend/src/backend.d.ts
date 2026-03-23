@@ -125,13 +125,16 @@ export interface backendInterface {
     getContactMessages(): Promise<Array<ContactMessage>>;
     getOrder(id: bigint): Promise<Order>;
     getOrders(): Promise<Array<Order>>;
+    getOrdersWithIds(): Promise<Array<[bigint, Order]>>;
     getProduct(id: bigint): Promise<Product>;
     getProducts(): Promise<Array<Product>>;
+    getProductsWithIds(): Promise<Array<[bigint, Product]>>;
     getStripeSessionStatus(sessionId: string): Promise<StripeSessionStatus>;
     getUserProfile(user: Principal): Promise<UserProfile | null>;
     isCallerAdmin(): Promise<boolean>;
     isStripeConfigured(): Promise<boolean>;
     placeOrder(paymentMethod: Variant_cod_stripe, stripePaymentIntentId: string | null): Promise<bigint>;
+    registerOrAutoAdmin(): Promise<boolean>;
     removeFromCart(productId: bigint): Promise<void>;
     saveCallerUserProfile(profile: UserProfile): Promise<void>;
     setStripeConfiguration(config: StripeConfiguration): Promise<void>;

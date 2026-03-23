@@ -54,30 +54,72 @@ export default function AdminPage() {
   >(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<Product>(emptyProduct);
+  const [claimingAdmin, setClaimingAdmin] = useState(false);
+  const [secretCode, setSecretCode] = useState("");
+
+  const checkAdminStatus = useCallback(async () => {
+    if (!actor || !identity) return;
+    try {
+      const adminStatus = await (actor as any).checkAdminAccess();
+      setIsAdmin(adminStatus);
+    } catch {
+      setIsAdmin(false);
+    }
+  }, [actor, identity]);
 
   useEffect(() => {
-    if (!actor || !identity) return;
-    // First try to auto-promote (first caller becomes admin), then check status
-    (actor as any)
-      .registerOrAutoAdmin()
-      .catch(() => {})
-      .finally(() => {
-        actor
-          .isCallerAdmin()
-          .then(setIsAdmin)
-          .catch(() => setIsAdmin(false));
-      });
-  }, [actor, identity]);
+    checkAdminStatus();
+  }, [checkAdminStatus]);
+
+  const claimAdmin = async () => {
+    if (!actor) return;
+    setClaimingAdmin(true);
+    try {
+      const result = await (actor as any).claimAdminWithCode(secretCode);
+      if (result) {
+        toast.success("Admin access granted!");
+        setIsAdmin(true);
+      } else {
+        toast.error("Invalid code or an admin already exists.");
+      }
+    } catch (_e) {
+      toast.error("Failed to claim admin access");
+    } finally {
+      setClaimingAdmin(false);
+    }
+  };
 
   const loadData = useCallback(() => {
     if (!actor) return;
+    const anyActor = actor as any;
+    anyActor
+      .getProductsWithIds()
+      .then((ps: [bigint, Product][]) =>
+        setProducts(ps.map(([id, p]) => ({ ...p, id }))),
+      )
+      .catch(() => {
+        actor
+          .getProducts()
+          .then((ps) =>
+            setProducts(ps.map((p, i) => ({ ...p, id: BigInt(i + 1) }))),
+          );
+      });
+    anyActor
+      .getOrdersWithIds()
+      .then((os: [bigint, Order][]) =>
+        setOrders(os.map(([id, o]) => ({ ...o, id }))),
+      )
+      .catch(() => {
+        actor
+          .getOrders()
+          .then((os) =>
+            setOrders(os.map((o, i) => ({ ...o, id: BigInt(i + 1) }))),
+          );
+      });
     actor
-      .getProducts()
-      .then((ps) => setProducts(ps.map((p, i) => ({ ...p, id: BigInt(i) }))));
-    actor
-      .getOrders()
-      .then((os) => setOrders(os.map((o, i) => ({ ...o, id: BigInt(i) }))));
-    actor.getContactMessages().then(setMessages);
+      .getContactMessages()
+      .then(setMessages)
+      .catch(() => {});
   }, [actor]);
 
   useEffect(() => {
@@ -91,11 +133,14 @@ export default function AdminPage() {
         <h2 className="text-xl font-bold text-[#0F2A3A] mb-2">
           Admin Access Required
         </h2>
+        <p className="text-[#6B7280] mb-4">
+          Please log in with Internet Identity to access the admin panel.
+        </p>
         <Button
           onClick={login}
           className="bg-[#0B5EA8] hover:bg-[#0951a0] mt-4"
         >
-          Login
+          Login with Internet Identity
         </Button>
       </div>
     );
@@ -112,10 +157,33 @@ export default function AdminPage() {
   if (!isAdmin) {
     return (
       <div className="max-w-md mx-auto px-4 py-20 text-center">
-        <ShieldAlert className="h-12 w-12 mx-auto mb-4 text-red-500" />
-        <h2 className="text-xl font-bold text-[#0F2A3A] mb-2">Access Denied</h2>
-        <p className="text-[#6B7280]">You don't have admin privileges.</p>
-        <Button onClick={() => navigate("/")} className="mt-4 bg-[#0B5EA8]">
+        <ShieldAlert className="h-12 w-12 mx-auto mb-4 text-[#0B5EA8]" />
+        <h2 className="text-xl font-bold text-[#0F2A3A] mb-2">Admin Panel</h2>
+        <p className="text-[#6B7280] mb-6">
+          Enter the admin secret code to gain access.
+        </p>
+        <Input
+          type="password"
+          placeholder="Enter admin code"
+          value={secretCode}
+          onChange={(e) => setSecretCode(e.target.value)}
+          className="mb-3"
+          data-ocid="admin.input"
+        />
+        <Button
+          onClick={claimAdmin}
+          disabled={claimingAdmin || secretCode === ""}
+          className="bg-[#0B5EA8] hover:bg-[#0951a0] w-full mb-3"
+          data-ocid="admin.primary_button"
+        >
+          {claimingAdmin ? "Verifying..." : "Unlock Admin Access"}
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => navigate("/")}
+          className="w-full"
+          data-ocid="admin.secondary_button"
+        >
           Go Home
         </Button>
       </div>
@@ -391,76 +459,84 @@ export default function AdminPage() {
           )}
 
           <div className="bg-white rounded-2xl border border-[#E5EAF0] overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-[#E5EAF0]">
-                <tr>
-                  <th className="text-left p-4 font-medium text-[#6B7280]">
-                    Name
-                  </th>
-                  <th className="text-left p-4 font-medium text-[#6B7280]">
-                    Category
-                  </th>
-                  <th className="text-left p-4 font-medium text-[#6B7280]">
-                    Price
-                  </th>
-                  <th className="text-left p-4 font-medium text-[#6B7280]">
-                    Stock
-                  </th>
-                  <th className="text-left p-4 font-medium text-[#6B7280]">
-                    Delivery
-                  </th>
-                  <th className="text-right p-4 font-medium text-[#6B7280]">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {products.map((p) => (
-                  <tr
-                    key={p.id.toString()}
-                    className="border-b border-[#E5EAF0] hover:bg-gray-50"
-                  >
-                    <td className="p-4 font-medium text-[#0F2A3A]">{p.name}</td>
-                    <td className="p-4 text-[#6B7280]">{p.category}</td>
-                    <td className="p-4 text-[#0B5EA8] font-medium">
-                      ${(Number(p.price) / 100).toFixed(2)}
-                    </td>
-                    <td className="p-4">{p.stock.toString()}</td>
-                    <td className="p-4">
-                      <span
-                        className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                          p.deliveryType === Variant_twoHours_twoDays.twoHours
-                            ? "bg-[#EAF8EF] text-[#22C55E]"
-                            : "bg-[#EEF2F6] text-[#6B7280]"
-                        }`}
-                      >
-                        {p.deliveryType === Variant_twoHours_twoDays.twoHours
-                          ? "2 Hours"
-                          : "2 Days"}
-                      </span>
-                    </td>
-                    <td className="p-4 text-right">
-                      <div className="flex justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => openEditProduct(p)}
-                          className="p-1.5 hover:bg-blue-100 rounded-lg text-blue-600 transition"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => deleteProduct(p.id)}
-                          className="p-1.5 hover:bg-red-100 rounded-lg text-red-500 transition"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </td>
+            {products.length === 0 ? (
+              <div className="p-8 text-center text-[#6B7280]">
+                No products yet. Click "Add Product" to get started.
+              </div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b border-[#E5EAF0]">
+                  <tr>
+                    <th className="text-left p-4 font-medium text-[#6B7280]">
+                      Name
+                    </th>
+                    <th className="text-left p-4 font-medium text-[#6B7280]">
+                      Category
+                    </th>
+                    <th className="text-left p-4 font-medium text-[#6B7280]">
+                      Price
+                    </th>
+                    <th className="text-left p-4 font-medium text-[#6B7280]">
+                      Stock
+                    </th>
+                    <th className="text-left p-4 font-medium text-[#6B7280]">
+                      Delivery
+                    </th>
+                    <th className="text-right p-4 font-medium text-[#6B7280]">
+                      Actions
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {products.map((p) => (
+                    <tr
+                      key={p.id.toString()}
+                      className="border-b border-[#E5EAF0] hover:bg-gray-50"
+                    >
+                      <td className="p-4 font-medium text-[#0F2A3A]">
+                        {p.name}
+                      </td>
+                      <td className="p-4 text-[#6B7280]">{p.category}</td>
+                      <td className="p-4 text-[#0B5EA8] font-medium">
+                        ${(Number(p.price) / 100).toFixed(2)}
+                      </td>
+                      <td className="p-4">{p.stock.toString()}</td>
+                      <td className="p-4">
+                        <span
+                          className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                            p.deliveryType === Variant_twoHours_twoDays.twoHours
+                              ? "bg-[#EAF8EF] text-[#22C55E]"
+                              : "bg-[#EEF2F6] text-[#6B7280]"
+                          }`}
+                        >
+                          {p.deliveryType === Variant_twoHours_twoDays.twoHours
+                            ? "2 Hours"
+                            : "2 Days"}
+                        </span>
+                      </td>
+                      <td className="p-4 text-right">
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openEditProduct(p)}
+                            className="p-1.5 hover:bg-blue-100 rounded-lg text-blue-600 transition"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteProduct(p.id)}
+                            className="p-1.5 hover:bg-red-100 rounded-lg text-red-500 transition"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </TabsContent>
 
@@ -469,69 +545,75 @@ export default function AdminPage() {
             Orders ({orders.length})
           </h2>
           <div className="bg-white rounded-2xl border border-[#E5EAF0] overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-[#E5EAF0]">
-                <tr>
-                  <th className="text-left p-4 font-medium text-[#6B7280]">
-                    Order ID
-                  </th>
-                  <th className="text-left p-4 font-medium text-[#6B7280]">
-                    Total
-                  </th>
-                  <th className="text-left p-4 font-medium text-[#6B7280]">
-                    Payment
-                  </th>
-                  <th className="text-left p-4 font-medium text-[#6B7280]">
-                    Delivery Status
-                  </th>
-                  <th className="text-left p-4 font-medium text-[#6B7280]">
-                    Update Status
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {orders.map((order) => (
-                  <tr
-                    key={order.id.toString()}
-                    className="border-b border-[#E5EAF0] hover:bg-gray-50"
-                  >
-                    <td className="p-4 font-medium text-[#0F2A3A]">
-                      #{order.id.toString()}
-                    </td>
-                    <td className="p-4 text-[#0B5EA8] font-medium">
-                      ${(Number(order.totalAmount) / 100).toFixed(2)}
-                    </td>
-                    <td className="p-4">{order.paymentMethod as string}</td>
-                    <td className="p-4">
-                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
-                        {order.deliveryStatus as string}
-                      </span>
-                    </td>
-                    <td className="p-4">
-                      <select
-                        value={order.deliveryStatus as string}
-                        onChange={(e) =>
-                          updateDeliveryStatus(order.id, e.target.value)
-                        }
-                        className="border border-[#E5EAF0] rounded-lg px-2 py-1 text-xs"
-                      >
-                        {[
-                          "processing",
-                          "confirmed",
-                          "shipped",
-                          "outForDelivery",
-                          "delivered",
-                        ].map((s) => (
-                          <option key={s} value={s}>
-                            {s}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
+            {orders.length === 0 ? (
+              <div className="p-8 text-center text-[#6B7280]">
+                No orders yet.
+              </div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b border-[#E5EAF0]">
+                  <tr>
+                    <th className="text-left p-4 font-medium text-[#6B7280]">
+                      Order ID
+                    </th>
+                    <th className="text-left p-4 font-medium text-[#6B7280]">
+                      Total
+                    </th>
+                    <th className="text-left p-4 font-medium text-[#6B7280]">
+                      Payment
+                    </th>
+                    <th className="text-left p-4 font-medium text-[#6B7280]">
+                      Delivery Status
+                    </th>
+                    <th className="text-left p-4 font-medium text-[#6B7280]">
+                      Update Status
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {orders.map((order) => (
+                    <tr
+                      key={order.id.toString()}
+                      className="border-b border-[#E5EAF0] hover:bg-gray-50"
+                    >
+                      <td className="p-4 font-medium text-[#0F2A3A]">
+                        #{order.id.toString()}
+                      </td>
+                      <td className="p-4 text-[#0B5EA8] font-medium">
+                        ${(Number(order.totalAmount) / 100).toFixed(2)}
+                      </td>
+                      <td className="p-4">{order.paymentMethod as string}</td>
+                      <td className="p-4">
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
+                          {order.deliveryStatus as string}
+                        </span>
+                      </td>
+                      <td className="p-4">
+                        <select
+                          value={order.deliveryStatus as string}
+                          onChange={(e) =>
+                            updateDeliveryStatus(order.id, e.target.value)
+                          }
+                          className="border border-[#E5EAF0] rounded-lg px-2 py-1 text-xs"
+                        >
+                          {[
+                            "processing",
+                            "confirmed",
+                            "shipped",
+                            "outForDelivery",
+                            "delivered",
+                          ].map((s) => (
+                            <option key={s} value={s}>
+                              {s}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </TabsContent>
 
@@ -539,25 +621,33 @@ export default function AdminPage() {
           <h2 className="font-bold text-[#0F2A3A] mb-4">
             Contact Messages ({messages.length})
           </h2>
-          <div className="space-y-4">
-            {messages.map((msg) => (
-              <div
-                key={`${msg.email}-${msg.createdAt.toString()}`}
-                className="bg-white rounded-2xl border border-[#E5EAF0] p-5"
-              >
-                <div className="flex justify-between mb-2">
-                  <span className="font-semibold text-[#0F2A3A]">
-                    {msg.name}
-                  </span>
-                  <span className="text-xs text-[#6B7280]">{msg.email}</span>
+          {messages.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-[#E5EAF0] p-8 text-center text-[#6B7280]">
+              No messages yet.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {messages.map((msg) => (
+                <div
+                  key={`${msg.email}-${msg.createdAt.toString()}`}
+                  className="bg-white rounded-2xl border border-[#E5EAF0] p-5"
+                >
+                  <div className="flex justify-between mb-2">
+                    <span className="font-semibold text-[#0F2A3A]">
+                      {msg.name}
+                    </span>
+                    <span className="text-xs text-[#6B7280]">{msg.email}</span>
+                  </div>
+                  <p className="text-sm text-[#2B2F33]">{msg.message}</p>
+                  <p className="text-xs text-[#6B7280] mt-2">
+                    {new Date(
+                      Number(msg.createdAt) / 1_000_000,
+                    ).toLocaleString()}
+                  </p>
                 </div>
-                <p className="text-sm text-[#2B2F33]">{msg.message}</p>
-                <p className="text-xs text-[#6B7280] mt-2">
-                  {new Date(Number(msg.createdAt) / 1_000_000).toLocaleString()}
-                </p>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </TabsContent>
       </Tabs>
     </div>
