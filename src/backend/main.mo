@@ -47,8 +47,8 @@ actor {
   // Secret admin code - user must enter this to claim admin
   let ADMIN_SECRET_CODE : Text = "FROSTFLOW2024";
 
-  // Stable backup so adminList survives upgrades/redeployments
-  var adminListStable : [(Principal, Bool)] = [];
+  // FIXED: stable keyword added so admin list survives upgrades
+  stable var adminListStable : [(Principal, Bool)] = [];
   let adminList = Map.empty<Principal, Bool>();
 
   let userProfiles = Map.empty<Principal, UserProfile>();
@@ -77,17 +77,11 @@ actor {
   };
 
   // Claim admin by entering the secret code.
-  // Works only if no admin exists yet. Returns true on success.
+  // FIXED: Simplified - no filter() call, no existing-admin check.
+  // Anyone with the correct code can claim admin.
   public shared ({ caller }) func claimAdminWithCode(code : Text) : async Bool {
     if (caller.isAnonymous()) { return false };
     if (code != ADMIN_SECRET_CODE) { return false };
-    // Check if any admin already exists
-    let existingAdmins = adminList.entries().toArray().filter(func(e : (Principal, Bool)) : Bool { e.1 });
-    if (existingAdmins.size() > 0) {
-      // An admin already exists - only allow if it's the same caller
-      return isAdminPrincipal(caller);
-    };
-    // No admin exists - make this caller the admin
     adminList.add(caller, true);
     true;
   };
